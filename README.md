@@ -1,6 +1,6 @@
 # Krut Engine
 
-An FPS game engine built from scratch in C#/MonoGame, with [TrenchBroom](https://trenchbroom.github.io/) as the level editor. Solo project, early development.
+An FPS game engine built from scratch in C#/MonoGame, with [TrenchBroom](https://trenchbroom.github.io/) as the level editor. Early development.
 
 ![Gameplay](docs/screenshots/gameplay.png)
 
