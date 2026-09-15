@@ -1,6 +1,6 @@
 # Krut Engine
 
-An FPS game engine built from scratch in C#/MonoGame, with [TrenchBroom](https://trenchbroom.github.io/) as the level editor. Early development.
+An FPS game engine built from scratch in C#/MonoGame, with [TrenchBroom](https://trenchbroom.github.io/) as the level editor. Solo project, early development.
 
 ![Gameplay](docs/screenshots/gameplay.png)
 
@@ -14,11 +14,12 @@ An FPS game engine built from scratch in C#/MonoGame, with [TrenchBroom](https:/
 | [Sledge.Formats.Bsp](https://github.com/LogicAndTrick/sledge-formats) | Reads compiled Quake/GoldSrc `.bsp` files (geometry, embedded textures, baked lightmaps) |
 | [ImGui.NET](https://github.com/ImGuiNET/ImGui.NET) | Debug overlay, main menu, pause menu, options |
 | [SharpGLTF](https://github.com/vpenades/SharpGLTF) | Skeletal animation for rigged glTF models (CPU skinning, no custom shader) |
+| [DotRecast](https://github.com/ikpil/DotRecast) | Recast/Detour navmesh generation and pathfinding queries (C# port), used for enemy AI |
 | Native AOT | Publishes to a single small `.exe` with no `.NET` runtime required on the target machine |
 
 ## Subsystem status
 
-A rough, honest self-assessment of how far each part of the engine is from what a complete singleplayer-campaign engine needs. Movement and build/deploy are close to done; the entity/scripting layer and AI are the biggest gaps.
+A rough, honest self-assessment of how far each part of the engine is from what a complete singleplayer-campaign engine needs. Movement and build/deploy are close to done; the AI framework itself is solid too now (blocked mainly on art, not code). The entity/scripting layer has real trigger-driven logic now (target/targetname), but moving/kinematic geometry (doors, platforms) is still a separate, unbuilt piece.
 
 | Subsystem | Status | Missing |
 |---|---|---|
@@ -31,8 +32,8 @@ A rough, honest self-assessment of how far each part of the engine is from what 
 | UI & settings | ~70% | Solid menu/pause/options, but it's all ad hoc ImGui calls — no general widget/HUD framework for future screens |
 | Save/load | ~20% | Only settings are persisted — no framework for saving/loading actual game state |
 | Audio | ~25% | Just fire-and-forget `SoundEffect.Play()` for weapons — no 3D positional audio, no ambient/music engine, no central audio manager |
-| Entity/scripting layer | ~15% | Entities are parsed and triggers excluded from collision, but nothing reacts to a trigger yet — no doors, buttons, or level logic |
-| AI/pathfinding framework | 0% | Not started — not even the foundation (navmesh, state machines) |
+| Entity/scripting layer | ~35% | Classic Quake/Half-Life target/targetname trigger→activate framework works (trigger volumes can remove a named entity) — but no moving/kinematic geometry yet, so real doors/buttons/platforms aren't possible until that's built |
+| AI/pathfinding framework | ~65% | Framework itself is solid (real navmesh pathfinding, 4-state FSM, working hit detection) — mainly blocked on art (rigged/animated enemy models) and content (only one enemy type, no ranged enemies, no encounter/wave design or difficulty tuning) rather than code |
 
 ## What it can do right now
 
@@ -60,6 +61,20 @@ A rough, honest self-assessment of how far each part of the engine is from what 
 - The weapon is rendered with its own, narrower field of view than the world, so long guns don't look stretched at the world's wide FOV — a standard trick borrowed from classic FPS engines
 - Animation changes (drawing a weapon, switching between idle/walk/run, reloading) crossfade instead of snapping, blending the actual skinned vertex positions between the old and new pose over a short window
 
+**Combat & AI**
+- A generic entity framework (`Entity`/`EntityWorld`), engine-level and not enemy-specific, so future props/pickups can be built on the same foundation instead of being special-cased
+- One enemy type so far (melee), following the same base/subclass pattern as the weapon system — health, speed, attack range/damage, etc. are overridable per enemy type instead of duplicated or branched with `if`s
+- A simple 4-state AI (Idle → Chase → Attack, plus a Search state that goes to the last-seen position before giving up) driven by line-of-sight raycasts, with horizontal and vertical attack range checked independently so an enemy at the foot of a staircase doesn't "attack" through the floor
+- Real pathfinding: a Recast/Detour polygon navmesh (via the DotRecast C# port), built once per level from the exact same collision geometry everything else uses — enemies path around obstacles and up stairs instead of walking straight at the player
+- The player has health, takes damage from enemy attacks, and respawns at the map's start point on death
+- Weapon fire is entity-aware — every shot tests against enemy hitboxes first (closest of world geometry or an entity wins), not just world decals — enemies flash white for a moment on every registered hit as visual confirmation
+- A dev-only spawn tool (`Mouse 5`, raycasts to wherever you're looking) for quickly testing enemies without a dedicated level-editor entity yet
+
+**Scripting**
+- Classic Quake/Half-Life `target`/`targetname` convention: a trigger volume (`trigger_once`/`trigger_multiple`, placed and named in TrenchBroom/J.A.C.K.) activates every entity whose `targetname` matches its `target` — no hardcoded link between a specific trigger and a specific effect
+- Any entity can opt in by implementing a generic `ITargetable` interface; enemies are the first user (a trigger can remove/kill a named enemy — a common scripted-event/safe-zone pattern), not something baked into the trigger itself
+- A small `.fgd` file describes the engine's custom entity classes (spawn points, triggers, lights) so TrenchBroom/J.A.C.K. show the right fields and link lines instead of raw, hand-typed key/value pairs
+
 **UI & settings**
 - Main menu automatically lists every level file found (`.map` or `.bsp`, loose or packed) — no code changes needed to add a new one
 - A minimal Steam-style FPS counter (just the number, no window chrome) sits in the corner during gameplay, updated once a second so it's actually readable
@@ -71,9 +86,11 @@ A rough, honest self-assessment of how far each part of the engine is from what 
   - **Audio**: a single master volume slider
 - All settings are saved automatically to `Saves/settings.json` next to the executable and reloaded on next launch
 - `-map <name>` command-line argument skips straight to a level, for launching from TrenchBroom's own "Launch Engine" tool during map testing
+- A "Loading…" screen (with a spinner) covers level loading instead of the window just freezing — `StartGame` is a heavy blocking call (rebuilds the world renderer, collision, and navmesh from scratch)
 
 **Performance**
-- 300 FPS cap (V-Sync optional via the menu)
+- Uncapped frame rate (V-Sync optional via the menu)
+- GPU-skinned weapon viewmodels (bone matrices only, not per-vertex, uploaded per frame)
 - Mipmapped, anisotropically filtered textures (no shimmering at a distance)
 - Publishes with Native AOT: a single ~18 MB folder (`Game.exe` + a packed `assets.pak`), no `.NET` install required to run
 - The weapon arms/gun rigs are CPU-skinned every frame; that's cheap enough in an optimized build but can get slow in an unoptimized Debug build — run with `-c Release` (see below) if framerate looks off during development
@@ -95,17 +112,9 @@ A rough, honest self-assessment of how far each part of the engine is from what 
 ## Not done yet
 
 - Directional/"sun" lighting and shadows for `.map` sources without baked lightmaps (only point lights + a flat ambient term, no shadow casting)
-- Trigger volumes are recognized and excluded from collision, but nothing reacts to them yet — no scripting/logic layer (doors, buttons, level triggers, pickups)
+- Trigger volumes can activate named entities now (target/targetname), but there's no moving/kinematic geometry yet — no real doors, buttons, or platforms, just the activation plumbing they'd eventually use
 - No aim-down-sights yet
 - Visual effects — bullet-hole decals exist, but no particles, muzzle flashes, or explosions
-- AI — no enemies/NPCs, pathfinding, or behavior logic of any kind yet
+- AI: the framework (navmesh pathfinding, FSM, hit detection) works well, but only one melee enemy type exists, with a placeholder (unrigged) model — no ranged enemies, no rigged/animated enemy models, no encounter/wave design or difficulty tuning
 - Ragdolls — no physics-driven death/hit reactions, characters would just be static or animation-only
 - Encrypting `assets.pak` (currently a plain zip — openable with any archive tool)
-
-## Build & run
-
-```bash
-dotnet run --project Krut.Game -c Release
-```
-
-Drop a `.map` file (TrenchBroom, "Standard" or "Valve" format) or a compiled `.bsp` into `Krut.Game/Maps/` and it shows up in the main menu's level list automatically on the next launch.
